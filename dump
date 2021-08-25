@@ -1,0 +1,74 @@
+#!/bin/bash
+
+function help_message() {
+    prog=$1
+    cat <<  EOF
+Usage: ${prog}
+    -h, --help                       
+        Print help message.
+
+    -bdev, --boot-device=[device]               Required
+        Boot device, must be vfat type.
+        If not mounted, it'will be mounted on ./src_boot/.
+
+    -rdev, --root-device=[device]               Required
+        Root device, must be ext4 type.
+        If not mounted, it'will be mounted on ./src_root/.
+EOF
+}
+
+function check() {
+    BIN=$1
+
+    echo -n  "checking ${BIN} ... "
+    LOC=`which ${BIN}` || { echo -e "\033[;31m not found \033[0m"; return 1; }
+    echo -e "\033[;32m ${LOC} \033[0m"
+}
+
+## Parse arguments
+if_help=false
+boot_device=""
+root_device=""
+for opt
+do
+    case ${opt} in
+        -*=*) value=$(echo "$opt"|sed -e 's/[-_a-zA-Z0-9]*=//') ;;
+           *) value=""                                          ;;
+    esac
+
+    case ${opt} in
+        -h|--help)                  if_help=true                                  ;;
+        -bdev=*|--boot-device=*)    boot_device=${value}                          ;;
+        -rdev=*|--root-device=*)    root_device=${value}                          ;;
+        *) echo "invalid argument $opt"
+           exit 1
+           ;;
+    esac
+done
+
+[ ${if_help} == true ] && help_message $0 && exit 0
+[ "${boot_device}" == "" ] && echo "-bdev|--boot-device is required" && exit 1
+[ "${root_device}" == "" ] && echo "-rdev|--root-device is required" && exit 1
+
+
+echo ${boot_device}
+echo ${root_device}
+
+echo "[Pre-check tools]"
+check "mount"     || exit 1
+check "parted"    || exit 1
+check "kpartx"    || exit 1
+check "mkfs.vfat" || exit 1
+check "mkfs.ext4" || exit 1
+check "losetup"   || exit 1
+check "blkid"     || exit 1
+
+MOUNT=$(which mount)
+PARTED=$(which parted)
+KPARTX=$(which kpartx)
+MKFS_VFAT=$(which mkfs.vfat)
+MKFS_EXT4=$(which mkfs.ext4)
+LOSETUP=$(which losetup)
+BLKID=$(which blkid)
+
+

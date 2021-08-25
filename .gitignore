@@ -1,0 +1,5 @@
+*.img
+src_root
+src_boot
+dst_boot
+dst_root
