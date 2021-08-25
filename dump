@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Global const
+DEFAULT_BOOT_MOUNT_POINT="./src_boot/"
+DEFAULT_ROOT_MOUNT_POINT="./src_root/"
+BOOT_FS_TYPE="vfat"
+ROOT_FS_TYPE="ext4"
+
 function help_message() {
     prog=$1
     cat <<  EOF
@@ -9,20 +15,28 @@ Usage: ${prog}
 
     -bdev, --boot-device=[device]               Required
         Boot device, must be vfat type.
-        If not mounted, it'will be mounted on ./src_boot/.
+        If not mounted, it will be mounted on ${DEFAULT_BOOT_MOUNT_POINT}.
 
     -rdev, --root-device=[device]               Required
         Root device, must be ext4 type.
-        If not mounted, it'will be mounted on ./src_root/.
+        If not mounted, it will be mounted on ${DEFAULT_ROOT_MOUNT_POINT}.
 EOF
 }
 
-function check() {
+function check_bin() {
     BIN=$1
 
     echo -n  "checking ${BIN} ... "
     LOC=`which ${BIN}` || { echo -e "\033[;31m not found \033[0m"; return 1; }
     echo -e "\033[;32m ${LOC} \033[0m"
+}
+
+function check_dev() {
+    dev=$1
+
+    echo -n  "checking device ${dev} ... "
+    sudo ${FDISK} -l ${dev} > /dev/null 2>&1 || { echo -e "\033[;31m doesn't exists \033[0m"; return 1; }
+    echo -e "\033[;32m ok \033[0m"
 }
 
 ## Parse arguments
@@ -51,18 +65,17 @@ done
 [ "${root_device}" == "" ] && echo "-rdev|--root-device is required" && exit 1
 
 
-echo ${boot_device}
-echo ${root_device}
+echo "[Check tools]"
+check_bin "fdisk"     || exit 1
+check_bin "mount"     || exit 1
+check_bin "parted"    || exit 1
+check_bin "kpartx"    || exit 1
+check_bin "mkfs.vfat" || exit 1
+check_bin "mkfs.ext4" || exit 1
+check_bin "losetup"   || exit 1
+check_bin "blkid"     || exit 1
 
-echo "[Pre-check tools]"
-check "mount"     || exit 1
-check "parted"    || exit 1
-check "kpartx"    || exit 1
-check "mkfs.vfat" || exit 1
-check "mkfs.ext4" || exit 1
-check "losetup"   || exit 1
-check "blkid"     || exit 1
-
+FDISK=$(which fdisk)
 MOUNT=$(which mount)
 PARTED=$(which parted)
 KPARTX=$(which kpartx)
@@ -71,4 +84,52 @@ MKFS_EXT4=$(which mkfs.ext4)
 LOSETUP=$(which losetup)
 BLKID=$(which blkid)
 
+echo ""
+echo "[Check device]"
+check_dev ${boot_device} || exit 1
+check_dev ${root_device} || exit 1
+
+echo ""
+echo "[Check mount point]"
+
+if_boot_mounted=True
+if_root_mounted=True
+boot_mount_point=""
+boot_fs_type=""
+root_mount_point=""
+root_fs_type=""
+
+
+sudo ${MOUNT} -l | grep "${boot_device}" > /dev/null 2>&1 || { echo "${boot_device} not mounted"; if_boot_mounted=False; }
+sudo ${MOUNT} -l | grep "${root_device}" > /dev/null 2>&1 || { echo "${root_device} not mounted"; if_root_mounted=False; }
+
+if [ ${if_boot_mounted} == False ]  
+then
+    # TODO
+    echo "Mounting ${boot_device} to ${DEFAULT_BOOT_MOUNT_POINT}"   
+    boot_mount_point=${DEFAULT_BOOT_MOUNT_POINT}
+    boot_fs_type=${BOOT_FS_TYPE}
+else
+    echo -n "${boot_device} already mounted on: "
+    boot_mount_point=`sudo ${MOUNT} | grep ${boot_device} | awk '{print $3}'`
+    boot_fs_type=`sudo ${MOUNT} | grep ${boot_device} | awk '{print $5}'`
+    echo "${boot_mount_point} ${boot_fs_type}"
+fi
+
+[ ${boot_fs_type} != ${BOOT_FS_TYPE} ] && echo "Error: Boot fs type must be ${BOOT_FS_TYPE}" && exit 1
+
+if [ ${if_root_mounted} == False ]  
+then
+    # TODO
+    echo "Mounting ${root_device} to ${DEFAULT_ROOT_MOUNT_POINT}"   
+    root_mount_point=${DEFAULT_ROOT_MOUNT_POINT}
+    root_fs_type=${ROOT_FS_TYPE}
+else
+    echo -n "${root_device} already mounted on: "
+    root_mount_point=`sudo ${MOUNT} | grep ${root_device} | awk '{print $3}'`
+    root_fs_type=`sudo ${MOUNT} | grep ${root_device} | awk '{print $5}'`
+    echo "${root_mount_point} ${root_fs_type}"
+fi
+
+[ ${root_fs_type} != ${ROOT_FS_TYPE} ] && echo "Error: Root fs type must be ${ROOT_FS_TYPE}" && exit 1
 
