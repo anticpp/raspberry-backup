@@ -13,34 +13,79 @@ Usage: ${prog}
     -h, --help                       
         Print help message.
 
-    -bdev, --boot-device=[device]               Required
+    -dev, --device=[device]     
+        Required. 
+        Device to be dumped from, example "/dev/mmcblk0".
+
+    -bdev, --boot-device=[device] 
         Boot device, must be vfat type.
+        If not specified, '{name-of-dev}'+"p1" will be used, exmple "/dev/mmcblk0p1".
         If not mounted, it will be mounted on ${DEFAULT_BOOT_MOUNT_POINT}.
 
-    -rdev, --root-device=[device]               Required
+    -rdev, --root-device=[device]
         Root device, must be ext4 type.
+        If not specified, '{name-of-dev}'+"p2" will be used, example "/dev/mmcblk0p2"
         If not mounted, it will be mounted on ${DEFAULT_ROOT_MOUNT_POINT}.
 EOF
 }
 
-function check_bin() {
-    BIN=$1
+function echo_succ() {
+    msg=$1
+    echo -e "\033[;32m ${msg} \033[0m"
+}
+function echo_succ_n() {
+    msg=$1
+    echo -ne "\033[;32m ${msg} \033[0m"
+}
 
-    echo -n  "checking ${BIN} ... "
-    LOC=`which ${BIN}` || { echo -e "\033[;31m not found \033[0m"; return 1; }
-    echo -e "\033[;32m ${LOC} \033[0m"
+function echo_error() {
+    msg=$1
+    echo -e "\033[;31m ${msg} \033[0m"
+}
+
+function echo_error_n() {
+    msg=$1
+    echo -ne "\033[;31m ${msg} \033[0m"
+}
+
+function check_bin() {
+    bin=$1
+
+    echo -n  "checking ${bin} ... "
+    loc=`which ${bin}` || { echo_error "not found"; return 1; }
+    echo_succ "${loc}"
 }
 
 function check_dev() {
     dev=$1
 
-    echo -n  "checking device ${dev} ... "
-    sudo ${FDISK} -l ${dev} > /dev/null 2>&1 || { echo -e "\033[;31m doesn't exists \033[0m"; return 1; }
-    echo -e "\033[;32m ok \033[0m"
+    echo -n "checking device ${dev} ... "
+    sudo ${FDISK} -l ${dev} > /dev/null 2>&1 || { echo_error "doesn't exists"; return 1; }
+    echo_succ "ok"
+}
+
+function check_mount_point() {
+    dev=$1
+    if_mounted=True
+    mount_point=""
+    fs_type=""
+    
+    sudo ${MOUNT} -l | grep "${dev}" > /dev/null 2>&1 || if_mounted=False
+    #if_mounted=False
+    if [ ${if_mounted} == False ]
+    then
+        echo "${if_mounted}"
+        return
+    fi
+
+    mount_point=`sudo ${MOUNT} -l | grep ${dev} | awk '{print $3}'`
+    fs_type=`sudo ${MOUNT} -l | grep ${dev} | awk '{print $5}'`
+    echo "${if_mounted} ${mount_point} ${fs_type}"
 }
 
 ## Parse arguments
 if_help=false
+device=""
 boot_device=""
 root_device=""
 for opt
@@ -52,6 +97,7 @@ do
 
     case ${opt} in
         -h|--help)                  if_help=true                                  ;;
+        -dev=*|--device=*)          device=${value}                               ;;
         -bdev=*|--boot-device=*)    boot_device=${value}                          ;;
         -rdev=*|--root-device=*)    root_device=${value}                          ;;
         *) echo "invalid argument $opt"
@@ -61,11 +107,13 @@ do
 done
 
 [ ${if_help} == true ] && help_message $0 && exit 0
-[ "${boot_device}" == "" ] && echo "-bdev|--boot-device is required" && exit 1
-[ "${root_device}" == "" ] && echo "-rdev|--root-device is required" && exit 1
+[ "${device}" == "" ] && echo "-dev|--device is required" && exit 1
+[ "${boot_device}" == "" ] && boot_device="${device}p1" && echo "Boot device is not specified, use \"${boot_device}\""
+[ "${root_device}" == "" ] && root_device="${device}p2" && echo "Root device is not specified, use \"${root_device}\""
 
-
+echo ""
 echo "[Check tools]"
+check_bin "pv"        || exit 1
 check_bin "fdisk"     || exit 1
 check_bin "mount"     || exit 1
 check_bin "parted"    || exit 1
@@ -86,12 +134,12 @@ BLKID=$(which blkid)
 
 echo ""
 echo "[Check device]"
+check_dev ${device}      || exit 1
 check_dev ${boot_device} || exit 1
 check_dev ${root_device} || exit 1
 
 echo ""
 echo "[Check mount point]"
-
 if_boot_mounted=True
 if_root_mounted=True
 boot_mount_point=""
@@ -99,37 +147,74 @@ boot_fs_type=""
 root_mount_point=""
 root_fs_type=""
 
+read if_boot_mounted boot_mount_point boot_fs_type < <(check_mount_point "${boot_device}")
+read if_root_mounted root_mount_point root_fs_type < <(check_mount_point "${root_device}")
 
-sudo ${MOUNT} -l | grep "${boot_device}" > /dev/null 2>&1 || { echo "${boot_device} not mounted"; if_boot_mounted=False; }
-sudo ${MOUNT} -l | grep "${root_device}" > /dev/null 2>&1 || { echo "${root_device} not mounted"; if_root_mounted=False; }
+if [ ${if_boot_mounted} == True ] 
+then
+    echo -n "${boot_device} mounted on ${boot_mount_point}, ${boot_fs_type} ..."
+    [ ${boot_fs_type} != ${BOOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Boot fs type must be ${BOOT_FS_TYPE}" && exit 1
+    echo_succ "ok"
+fi
 
+if [ ${if_root_mounted} == True ] 
+then
+    echo -n "${root_device} mounted on ${root_mount_point}, ${root_fs_type} ..."
+    [ ${root_fs_type} != ${ROOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Root fs type must be ${ROOT_FS_TYPE}" && exit 1
+    echo_succ "ok"
+fi
+
+echo ""
+echo "[Mount device if necessary]"
 if [ ${if_boot_mounted} == False ]  
 then
     # TODO
     echo "Mounting ${boot_device} to ${DEFAULT_BOOT_MOUNT_POINT}"   
-    boot_mount_point=${DEFAULT_BOOT_MOUNT_POINT}
-    boot_fs_type=${BOOT_FS_TYPE}
-else
-    echo -n "${boot_device} already mounted on: "
-    boot_mount_point=`sudo ${MOUNT} | grep ${boot_device} | awk '{print $3}'`
-    boot_fs_type=`sudo ${MOUNT} | grep ${boot_device} | awk '{print $5}'`
-    echo "${boot_mount_point} ${boot_fs_type}"
+    #boot_mount_point=${DEFAULT_BOOT_MOUNT_POINT}
+    #boot_fs_type=${BOOT_FS_TYPE}
 fi
-
-[ ${boot_fs_type} != ${BOOT_FS_TYPE} ] && echo "Error: Boot fs type must be ${BOOT_FS_TYPE}" && exit 1
 
 if [ ${if_root_mounted} == False ]  
 then
     # TODO
     echo "Mounting ${root_device} to ${DEFAULT_ROOT_MOUNT_POINT}"   
-    root_mount_point=${DEFAULT_ROOT_MOUNT_POINT}
-    root_fs_type=${ROOT_FS_TYPE}
-else
-    echo -n "${root_device} already mounted on: "
-    root_mount_point=`sudo ${MOUNT} | grep ${root_device} | awk '{print $3}'`
-    root_fs_type=`sudo ${MOUNT} | grep ${root_device} | awk '{print $5}'`
-    echo "${root_mount_point} ${root_fs_type}"
+    #root_mount_point=${DEFAULT_ROOT_MOUNT_POINT}
+    #root_fs_type=${ROOT_FS_TYPE}
 fi
 
-[ ${root_fs_type} != ${ROOT_FS_TYPE} ] && echo "Error: Root fs type must be ${ROOT_FS_TYPE}" && exit 1
+function get_fs_size_MB() {
+    mp=$1
+    sudo df ${mp} | sed 1d | awk '{print int($2/1024) }'
+}
 
+function get_fs_used_MB() {
+    mp=$1
+    sudo df ${mp} | sed 1d | awk '{print int($3/1024) }'
+}
+
+echo ""
+echo "[Create img file]"
+boot_fs_size_MB=`get_fs_size_MB "${boot_mount_point}"`
+root_fs_used_MB=`get_fs_used_MB "${root_mount_point}"`
+echo "Boot fs size: ${boot_fs_size_MB}MB"
+echo "Root fs size: ${root_fs_used_MB}MB"
+img_file_size_MB=`echo "${boot_fs_size_MB}+${root_fs_used_MB}+500" | bc ` # 500MB larger
+echo "New img file size: ${img_file_size_MB}MB"
+img_file="pi-`date +20%y%m%d%H%M`.img"
+#img_file="pi-test.img" # HACKED
+echo "Creating ${img_file}..."
+sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
+ls -l ./${img_file} > /dev/null 2>&1 || { echo_error_n "Error:"; echo "${img_file} not found"; exit 1; }
+echo_succ "..........................ok"
+
+echo ""
+echo "[Make partitions]"
+boot_start_sector=`sudo ${FDISK} -l ${device} | grep "${boot_device}" | awk '{print $2}'`
+boot_end_sector=`sudo ${FDISK} -l ${device} | grep "${boot_device}" | awk '{print $3}'`
+root_start_sector=`sudo ${FDISK} -l ${device} | grep "${root_device}" | awk '{print $2}'`
+echo "${boot_device} sectors: ${boot_start_sector}s ${boot_end_sector}s"
+echo "${root_device} sectors: ${root_start_sector}s -1"
+
+sudo ${PARTED} ${img_file} --script mklabel msdos
+sudo ${PARTED} ${img_file} --script mkpart primary fat32 ${boot_start_sector}s ${boot_end_sector}s
+sudo ${PARTED} ${img_file} --script mkpart primary ext4 ${root_start_sector}s 
