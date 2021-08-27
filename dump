@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # Global const
-DEFAULT_BOOT_MOUNT_POINT="./src_boot/"
-DEFAULT_ROOT_MOUNT_POINT="./src_root/"
+DEFAULT_SRC_BOOT_MOUNT_POINT="./src_boot/"
+DEFAULT_SRC_ROOT_MOUNT_POING="./src_root/"
+DEFAULT_DST_BOOT_MOUNT_POINT="./dst_boot/"
+DEFAULT_DST_ROOT_MOUNT_POINT="./dst_root/"
 BOOT_FS_TYPE="vfat"
 ROOT_FS_TYPE="ext4"
 
@@ -20,12 +22,12 @@ Usage: ${prog}
     -bdev, --boot-device=[device] 
         Boot device, must be vfat type.
         If not specified, '{name-of-dev}'+"p1" will be used, exmple "/dev/mmcblk0p1".
-        If not mounted, it will be mounted on ${DEFAULT_BOOT_MOUNT_POINT}.
+        If not mounted, it will be mounted on ${DEFAULT_SRC_BOOT_MOUNT_POINT}.
 
     -rdev, --root-device=[device]
         Root device, must be ext4 type.
         If not specified, '{name-of-dev}'+"p2" will be used, example "/dev/mmcblk0p2"
-        If not mounted, it will be mounted on ${DEFAULT_ROOT_MOUNT_POINT}.
+        If not mounted, it will be mounted on ${DEFAULT_SRC_ROOT_MOUNT_POING}.
 EOF
 }
 
@@ -83,11 +85,24 @@ function check_mount_point() {
     echo "${if_mounted} ${mount_point} ${fs_type}"
 }
 
+function get_fs_size_MB() {
+    mp=$1
+    sudo df ${mp} | sed 1d | awk '{print int($2/1024) }'
+}
+
+function get_fs_used_MB() {
+    mp=$1
+    sudo df ${mp} | sed 1d | awk '{print int($3/1024) }'
+}
+
 ## Parse arguments
 if_help=false
-device=""
-boot_device=""
-root_device=""
+src_device=""
+src_boot_device=""
+src_root_device=""
+dst_boot_mount_point=${DEFAULT_DST_BOOT_MOUNT_POINT}
+dst_root_mount_point=${DEFAULT_DST_ROOT_MOUNT_POINT}
+
 for opt
 do
     case ${opt} in
@@ -96,10 +111,10 @@ do
     esac
 
     case ${opt} in
-        -h|--help)                  if_help=true                                  ;;
-        -dev=*|--device=*)          device=${value}                               ;;
-        -bdev=*|--boot-device=*)    boot_device=${value}                          ;;
-        -rdev=*|--root-device=*)    root_device=${value}                          ;;
+        -h|--help)                  if_help=true                                      ;;
+        -dev=*|--device=*)          src_device=${value}                               ;;
+        -bdev=*|--boot-device=*)    src_boot_device=${value}                          ;;
+        -rdev=*|--root-device=*)    src_root_device=${value}                          ;;
         *) echo "invalid argument $opt"
            exit 1
            ;;
@@ -107,9 +122,12 @@ do
 done
 
 [ ${if_help} == true ] && help_message $0 && exit 0
-[ "${device}" == "" ] && echo "-dev|--device is required" && exit 1
-[ "${boot_device}" == "" ] && boot_device="${device}p1" && echo "Boot device is not specified, use \"${boot_device}\""
-[ "${root_device}" == "" ] && root_device="${device}p2" && echo "Root device is not specified, use \"${root_device}\""
+[ "${src_device}" == "" ] && echo "-dev|--device is required" && exit 1
+[ "${src_boot_device}" == "" ] && src_boot_device="${src_device}p1" && echo "Boot device is not specified, use \"${src_boot_device}\""
+[ "${src_root_device}" == "" ] && src_root_device="${src_device}p2" && echo "Root device is not specified, use \"${src_root_device}\""
+
+test -e ${dst_boot_mount_point} && { echo_error_n "Warning: "; echo "\"${dst_boot_mount_point}\" already exists, remove it before continue."; exit 1; }
+test -e ${dst_root_mount_point} && { echo_error_n "Warning: "; echo "\"${dst_root_mount_point}\" already exists, remove it before continue."; exit 1; }
 
 echo ""
 echo "[Check tools]"
@@ -122,6 +140,8 @@ check_bin "mkfs.vfat" || exit 1
 check_bin "mkfs.ext4" || exit 1
 check_bin "losetup"   || exit 1
 check_bin "blkid"     || exit 1
+check_bin "dump"      || exit 1
+check_bin "restore"   || exit 1
 
 FDISK=$(which fdisk)
 MOUNT=$(which mount)
@@ -131,90 +151,127 @@ MKFS_VFAT=$(which mkfs.vfat)
 MKFS_EXT4=$(which mkfs.ext4)
 LOSETUP=$(which losetup)
 BLKID=$(which blkid)
+DUMP=$(which dump)
+RESTORE=$(which restore)
 
 echo ""
 echo "[Check device]"
-check_dev ${device}      || exit 1
-check_dev ${boot_device} || exit 1
-check_dev ${root_device} || exit 1
+check_dev ${src_device}      || exit 1
+check_dev ${src_boot_device} || exit 1
+check_dev ${src_root_device} || exit 1
 
 echo ""
 echo "[Check mount point]"
-if_boot_mounted=True
-if_root_mounted=True
-boot_mount_point=""
-boot_fs_type=""
-root_mount_point=""
-root_fs_type=""
+if_src_boot_mounted=True
+if_src_root_mounted=True
+src_boot_mount_point=""
+src_boot_fs_type=""
+src_root_mount_point=""
+src_root_fs_type=""
 
-read if_boot_mounted boot_mount_point boot_fs_type < <(check_mount_point "${boot_device}")
-read if_root_mounted root_mount_point root_fs_type < <(check_mount_point "${root_device}")
+read if_src_boot_mounted src_boot_mount_point src_boot_fs_type < <(check_mount_point "${src_boot_device}")
+read if_src_root_mounted src_root_mount_point src_root_fs_type < <(check_mount_point "${src_root_device}")
 
-if [ ${if_boot_mounted} == True ] 
+if [ ${if_src_boot_mounted} == True ] 
 then
-    echo -n "${boot_device} mounted on ${boot_mount_point}, ${boot_fs_type} ..."
-    [ ${boot_fs_type} != ${BOOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Boot fs type must be ${BOOT_FS_TYPE}" && exit 1
+    echo -n "${src_boot_device} mounted on ${src_boot_mount_point}, ${src_boot_fs_type} ..."
+    [ ${src_boot_fs_type} != ${BOOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Boot fs type must be ${BOOT_FS_TYPE}" && exit 1
     echo_succ "ok"
 fi
 
-if [ ${if_root_mounted} == True ] 
+if [ ${if_src_root_mounted} == True ] 
 then
-    echo -n "${root_device} mounted on ${root_mount_point}, ${root_fs_type} ..."
-    [ ${root_fs_type} != ${ROOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Root fs type must be ${ROOT_FS_TYPE}" && exit 1
+    echo -n "${src_root_device} mounted on ${src_root_mount_point}, ${src_root_fs_type} ..."
+    [ ${src_root_fs_type} != ${ROOT_FS_TYPE} ] && echo_error_n "Error: " && echo "Root fs type must be ${ROOT_FS_TYPE}" && exit 1
     echo_succ "ok"
 fi
 
 echo ""
 echo "[Mount device if necessary]"
-if [ ${if_boot_mounted} == False ]  
+if [ ${if_src_boot_mounted} == False ]  
 then
     # TODO
-    echo "Mounting ${boot_device} to ${DEFAULT_BOOT_MOUNT_POINT}"   
-    #boot_mount_point=${DEFAULT_BOOT_MOUNT_POINT}
-    #boot_fs_type=${BOOT_FS_TYPE}
+    echo "Mounting ${src_boot_device} to ${DEFAULT_SRC_BOOT_MOUNT_POINT}"   
 fi
 
-if [ ${if_root_mounted} == False ]  
+if [ ${if_src_root_mounted} == False ]  
 then
     # TODO
-    echo "Mounting ${root_device} to ${DEFAULT_ROOT_MOUNT_POINT}"   
-    #root_mount_point=${DEFAULT_ROOT_MOUNT_POINT}
-    #root_fs_type=${ROOT_FS_TYPE}
+    echo "Mounting ${src_root_device} to ${DEFAULT_SRC_ROOT_MOUNT_POING}"   
 fi
-
-function get_fs_size_MB() {
-    mp=$1
-    sudo df ${mp} | sed 1d | awk '{print int($2/1024) }'
-}
-
-function get_fs_used_MB() {
-    mp=$1
-    sudo df ${mp} | sed 1d | awk '{print int($3/1024) }'
-}
 
 echo ""
 echo "[Create img file]"
-boot_fs_size_MB=`get_fs_size_MB "${boot_mount_point}"`
-root_fs_used_MB=`get_fs_used_MB "${root_mount_point}"`
+boot_fs_size_MB=`get_fs_size_MB "${src_boot_mount_point}"`
+root_fs_used_MB=`get_fs_used_MB "${src_root_mount_point}"`
 echo "Boot fs size: ${boot_fs_size_MB}MB"
 echo "Root fs size: ${root_fs_used_MB}MB"
 img_file_size_MB=`echo "${boot_fs_size_MB}+${root_fs_used_MB}+500" | bc ` # 500MB larger
 echo "New img file size: ${img_file_size_MB}MB"
 img_file="pi-`date +20%y%m%d%H%M`.img"
-#img_file="pi-test.img" # HACKED
+img_file="pi-202108270333.img" # HACKED
 echo "Creating ${img_file}..."
-sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
+#sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
 ls -l ./${img_file} > /dev/null 2>&1 || { echo_error_n "Error:"; echo "${img_file} not found"; exit 1; }
 echo_succ "..........................ok"
 
 echo ""
 echo "[Make partitions]"
-boot_start_sector=`sudo ${FDISK} -l ${device} | grep "${boot_device}" | awk '{print $2}'`
-boot_end_sector=`sudo ${FDISK} -l ${device} | grep "${boot_device}" | awk '{print $3}'`
-root_start_sector=`sudo ${FDISK} -l ${device} | grep "${root_device}" | awk '{print $2}'`
-echo "${boot_device} sectors: ${boot_start_sector}s ${boot_end_sector}s"
-echo "${root_device} sectors: ${root_start_sector}s -1"
+boot_start_sector=`sudo ${FDISK} -l ${src_device} | grep "${src_boot_device}" | awk '{print $2}'`
+boot_end_sector=`sudo ${FDISK} -l ${src_device} | grep "${src_boot_device}" | awk '{print $3}'`
+root_start_sector=`sudo ${FDISK} -l ${src_device} | grep "${src_root_device}" | awk '{print $2}'`
+root_end_sector="-1" # To the end
+echo "Boot partition, ${src_boot_device} sectors: ${boot_start_sector}s ${boot_end_sector}s"
+echo "Root partition, ${src_root_device} sectors: ${root_start_sector}s ${root_end_sector}"
 
-sudo ${PARTED} ${img_file} --script mklabel msdos
-sudo ${PARTED} ${img_file} --script mkpart primary fat32 ${boot_start_sector}s ${boot_end_sector}s
-sudo ${PARTED} ${img_file} --script mkpart primary ext4 ${root_start_sector}s 
+#sudo ${PARTED} ${img_file} --script "mklabel msdos"
+#sudo ${PARTED} ${img_file} --script "mkpart primary fat32 ${boot_start_sector}s ${boot_end_sector}s"
+#sudo ${PARTED} ${img_file} --script "mkpart primary ext4 ${root_start_sector}s ${root_end_sector}s" 
+
+echo ""
+echo "[Create device]"
+echo "Creating loop device ..."
+dst_device=`sudo ${LOSETUP} -f --show ${img_file}` || { echo_error "error"; exit 1; }
+echo_succ "...................${dst_device}"
+
+echo "Creating map device ..."
+sudo ${KPARTX} -va ${dst_device} || { echo_error "error"; exit 1; }
+echo_succ "..................................ok"
+
+ln=`echo "${dst_device}" | sed 's/\/dev\///g'`
+dst_boot_device="/dev/mapper/${ln}p1"
+dst_root_device="/dev/mapper/${ln}p2"
+
+echo "mkfs.vfat ${dst_boot_device} ..."
+sudo ${MKFS_VFAT} -n boot ${dst_boot_device} || { echo_error "error"; exit 1; }
+echo_succ "..................................ok"
+
+echo "mkfs.ext4 ${dst_root_device}..."
+sudo ${MKFS_EXT4} ${dst_root_device} || { echo_error "error"; exit 1; }
+echo_succ "..................................ok"
+
+echo ""
+echo "[Mount dst device]"
+sudo mkdir -pv ${dst_boot_mount_point} ${dst_root_mount_point} || { echo_error_n "Error: "; echo "mkdir fail"; exit 1; }
+echo -n "Mounting ${dst_boot_device} -> ${dst_boot_mount_point}..."
+sudo ${MOUNT} -t ${BOOT_FS_TYPE} -o uid=pi,gid=pi ${dst_boot_device} ${dst_boot_mount_point} || { echo_error "error"; exit 1; }
+echo_succ "ok"
+
+echo -n "Mounting ${dst_root_device} -> ${dst_root_mount_point}..."
+sudo ${MOUNT} -t ${ROOT_FS_TYPE} ${dst_root_device} ${dst_root_mount_point} || { echo_error "error"; exit 1; }
+echo_succ "ok"
+
+echo ""
+echo "[Clone filesystem]"
+echo "Cloning boot filesystem...."
+
+sudo cp -rfvp ${src_boot_mount_point}/* ${dst_boot_mount_point}
+echo_succ "..............................ok"
+
+echo "Cloning root filesystem...."
+sudo chown -R pi:pi ${dst_root_mount_point}
+rm -rfv "${dst_root_mount_point}/lost+found"
+cd ${dst_root_mount_point}
+sudo ${DUMP} -0auf - ${src_root_mount_point} | sudo ${RESTORE} -rf - 
+cd ../
+echo_succ "..............................ok"
