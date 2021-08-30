@@ -73,7 +73,6 @@ function check_mount_point() {
     fs_type=""
     
     sudo ${MOUNT} -l | grep "${dev}" > /dev/null 2>&1 || if_mounted=False
-    #if_mounted=False
     if [ ${if_mounted} == False ]
     then
         echo "${if_mounted}"
@@ -209,9 +208,9 @@ echo "Root fs size: ${root_fs_used_MB}MB"
 img_file_size_MB=`echo "${boot_fs_size_MB}+${root_fs_used_MB}+500" | bc ` # 500MB larger
 echo "New img file size: ${img_file_size_MB}MB"
 img_file="pi-`date +20%y%m%d%H%M`.img"
-img_file="pi-202108270333.img" # HACKED
+#img_file="pi-202108270333.img" # HACKED
 echo "Creating ${img_file}..."
-#sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
+sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
 ls -l ./${img_file} > /dev/null 2>&1 || { echo_error_n "Error:"; echo "${img_file} not found"; exit 1; }
 echo_succ "..........................ok"
 
@@ -224,9 +223,9 @@ root_end_sector="-1" # To the end
 echo "Boot partition, ${src_boot_device} sectors: ${boot_start_sector}s ${boot_end_sector}s"
 echo "Root partition, ${src_root_device} sectors: ${root_start_sector}s ${root_end_sector}"
 
-#sudo ${PARTED} ${img_file} --script "mklabel msdos"
-#sudo ${PARTED} ${img_file} --script "mkpart primary fat32 ${boot_start_sector}s ${boot_end_sector}s"
-#sudo ${PARTED} ${img_file} --script "mkpart primary ext4 ${root_start_sector}s ${root_end_sector}s" 
+sudo ${PARTED} ${img_file} --script "mklabel msdos"
+sudo ${PARTED} ${img_file} --script "mkpart primary fat32 ${boot_start_sector}s ${boot_end_sector}s"
+sudo ${PARTED} ${img_file} --script "mkpart primary ext4 ${root_start_sector}s ${root_end_sector}s" 
 
 echo ""
 echo "[Create device]"
@@ -265,7 +264,7 @@ echo ""
 echo "[Clone filesystem]"
 echo "Cloning boot filesystem...."
 
-sudo cp -rfvp ${src_boot_mount_point}/* ${dst_boot_mount_point}
+sudo cp -rfp ${src_boot_mount_point}/* ${dst_boot_mount_point}
 echo_succ "..............................ok"
 
 echo "Cloning root filesystem...."
@@ -275,3 +274,37 @@ cd ${dst_root_mount_point}
 sudo ${DUMP} -0auf - ${src_root_mount_point} | sudo ${RESTORE} -rf - 
 cd ../
 echo_succ "..............................ok"
+
+boot_partuuid=`sudo ${BLKID} | grep ${dst_boot_device} | awk '{print $NF}'` # PARTUUID=xxxxx
+root_partuuid=`sudo ${BLKID} | grep ${dst_root_device} | awk '{print $NF}'` # PARTUUID=xxxxx
+echo "Boot part: ${boot_partuuid}"
+echo "Root part: ${root_partuuid}"
+
+echo -n "Updating ${dst_boot_mount_point}/cmdline.txt ..."
+sed -i "s/PARTUUID=[0-9a-zA-Z-]*/${boot_partuuid}/g" ${dst_boot_mount_point}/cmdline.txt
+echo_succ "ok"
+
+echo -n "Updating ${dst_root_mount_point}/etc/fstab ..."
+cat << EOF | sudo tee > /dev/null ${dst_root_mount_point}/etc/fstab
+proc            /proc           proc    defaults          0       0
+${boot_partuuid}  /boot           vfat    defaults          0       2
+${root_partuuid}  /               ext4    defaults,noatime  0       1
+# a swapfile is not a swap partition, no line here
+#   use  dphys-swapfile swap[on|off]  for that
+EOF
+echo_succ "ok"
+
+echo ""
+echo "[Cleanup]"
+for l in ${dst_boot_mount_point} ${dst_root_mount_point}
+do
+    test -e $l && echo "umount $l ..." && sudo umount $l
+    test -e $l && echo "remove $l ..." && rm -rfv $l
+done
+
+echo "Remove device $device"
+sudo kpartx -d $device
+sudo losetup -d $device
+
+echo_succ "Done"
+

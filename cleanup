@@ -1,0 +1,22 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]
+then
+    echo "Usage: $0 device"
+fi
+
+device=$1
+
+for l in "./dst_boot" "./dst_root" "./src_boot" "./src_root"
+do
+    test -e $l && echo "umount $l ..." && sudo umount $l
+    test -e $l && echo "remove $l ..." && rm -rfv $l
+done
+
+echo "Delete device $device"
+sudo kpartx -d $device
+sudo losetup -d $device
+
+echo "Done"
+
+
