@@ -208,7 +208,6 @@ echo "Root fs size: ${root_fs_used_MB}MB"
 img_file_size_MB=`echo "${boot_fs_size_MB}+${root_fs_used_MB}+500" | bc ` # 500MB larger
 echo "New img file size: ${img_file_size_MB}MB"
 img_file="pi-`date +20%y%m%d%H%M`.img"
-#img_file="pi-202108270333.img" # HACKED
 echo "Creating ${img_file}..."
 sudo dd bs=1M count=${img_file_size_MB} if=/dev/zero | pv -s ${img_file_size_MB}M | sudo dd bs=1M of=./${img_file}
 ls -l ./${img_file} > /dev/null 2>&1 || { echo_error_n "Error:"; echo "${img_file} not found"; exit 1; }
@@ -275,8 +274,8 @@ sudo ${DUMP} -0auf - ${src_root_mount_point} | sudo ${RESTORE} -rf -
 cd ../
 echo_succ "..............................ok"
 
-boot_partuuid=`sudo ${BLKID} | grep ${dst_boot_device} | awk '{print $NF}'` # PARTUUID=xxxxx
-root_partuuid=`sudo ${BLKID} | grep ${dst_root_device} | awk '{print $NF}'` # PARTUUID=xxxxx
+boot_partuuid=`sudo ${BLKID} | grep ${dst_boot_device} | awk '{print $NF}' | sed 's/"//g'` # PARTUUID=xxxxx
+root_partuuid=`sudo ${BLKID} | grep ${dst_root_device} | awk '{print $NF}' | sed 's/"//g'` # PARTUUID=xxxxx
 echo "Boot part: ${boot_partuuid}"
 echo "Root part: ${root_partuuid}"
 
@@ -306,5 +305,6 @@ echo "Remove device ${dst_device}"
 sudo kpartx -d ${dst_device}
 sudo losetup -d ${dst_device}
 
+echo "${img_file}"
 echo_succ "Done"
 
