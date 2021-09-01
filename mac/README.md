@@ -1,10 +1,10 @@
-In order to read `ext4` filesystem, `ext4fuse` must be installed on MAC.
+In order to mount `ext4` filesystem, `ext4fuse` must be installed.
 
 
 # dump-from
 
-Copy image file from usb device to local.
+Dump image file from usb device to local file.
 
 # fire
 
-Restore image file to destinate device.
+Restore image file to dest device.
