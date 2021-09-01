@@ -1,3 +1,5 @@
+In order to read `ext4` filesystem, `ext4fuse` must be installed on MAC.
+
 
 # dump-from
 
