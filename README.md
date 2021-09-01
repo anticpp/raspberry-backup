@@ -1,10 +1,9 @@
+Toolkits to backup and restore raspberrypi easily.
 
-# dump
+# pi/ 
 
-Backup `boot fs` and `root fs` from source device, to image file.
+Using on raspberrypi.
 
-# setup/cleanup
+# mac/
 
-`Setup` will setup local device from local image file, and mount to `./dst_root/` and `./dst_root/`.
-
-`Cleanup` will undo what `Setup` does, umount directories and remove device.
+Using on mac.

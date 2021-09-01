@@ -1,0 +1,36 @@
+#!/bin/bash
+
+
+if [ $# -lt 2 ]
+then
+    echo "Usage: $0 imgfile device"
+    exit 1
+fi
+
+imgfile=$1
+device=$2
+filesize=`sudo ls -l ${imgfile}|awk '{print int($5/(1024*1024))}'`
+gzip=False
+
+suffix=`echo ${imgfile} | awk -F '.' '{print $NF}'`
+[ "${suffix}" == "gz" ] && gzip=True
+
+echo "imgfile: ${imgfile}"
+echo "device: ${device}"
+echo "filesize: ${filesize} MB"
+echo "gzip: ${gzip}"
+
+echo ""
+echo -e "\033[;31m[DANGEROUS]\033[0m"
+echo "It's dangerous flushing to ${device}, it'll not be recoverable."
+echo "Don't go on if you are not clear about what will happen."
+echo -n "Press \"YES\" to continue: "
+read yesOrNo
+[ "${yesOrNo}" != "YES" ] && echo "GoodBye!" && exit 0
+
+if [ ${gzip} == True ]
+then
+    sudo dd bs=4m if=${imgfile} | pv -s ${filesize}M | gunzip | sudo dd bs=4m of=${device}
+else
+    sudo dd bs=4m if=${imgfile} | pv -s ${filesize}M | sudo dd bs=4m of=${device}
+fi

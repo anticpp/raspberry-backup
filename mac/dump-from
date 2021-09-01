@@ -1,0 +1,53 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]
+then
+    echo "Usage: $0 from-file [--gzip]"
+    exit 1
+fi
+
+fromfile=$1
+gzip=False
+
+for opt
+do
+    case $opt in
+        --gzip) gzip=True       ;;
+    esac
+done
+
+filesize=0
+filename=`basename ${fromfile}`
+filesize=`sudo ls -l ${fromfile}|awk '{print int($5/(1024*1024))}'`
+dstfile=./${filename}
+
+echo "fromfile: ${fromfile}"
+echo "filename: ${filename}"
+echo "filesize: ${filesize} MB"
+echo "dstfile: ${dstfile}"
+echo "gzip: ${gzip}"
+
+echo "Dumping ..."
+sudo dd bs=4m if=${fromfile} | pv -s ${filesize}M | sudo dd bs=4m of=${dstfile}
+
+echo "Verifying ..."
+echo "calc sha1sum ${fromfile}..."
+shasrc=`sudo sha1sum ${fromfile} | awk '{print $1}'`
+echo ${shasrc}
+echo "calc sha1sum ${dstfile}..."
+shadst=`sudo sha1sum ${dstfile} | awk '{print $1}'`
+echo ${shadst}
+
+if [ "${shasrc}" != "${shadst}" ]
+then
+    echo "Error: sha1sum verify fail."
+    exit 1
+fi
+
+if [ ${gzip} == True ]
+then
+    echo "Gzip ..."
+    gzip ${dstfile}
+fi
+
+echo "Succ!"
