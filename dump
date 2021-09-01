@@ -281,7 +281,7 @@ echo "Boot part: ${boot_partuuid}"
 echo "Root part: ${root_partuuid}"
 
 echo -n "Updating ${dst_boot_mount_point}/cmdline.txt ..."
-sed -i "s/PARTUUID=[0-9a-zA-Z-]*/${boot_partuuid}/g" ${dst_boot_mount_point}/cmdline.txt
+sed -i "s/PARTUUID=[0-9a-zA-Z-]*/${root_partuuid}/g" ${dst_boot_mount_point}/cmdline.txt
 echo_succ "ok"
 
 echo -n "Updating ${dst_root_mount_point}/etc/fstab ..."
@@ -302,9 +302,9 @@ do
     test -e $l && echo "remove $l ..." && rm -rfv $l
 done
 
-echo "Remove device $device"
-sudo kpartx -d $device
-sudo losetup -d $device
+echo "Remove device ${dst_device}"
+sudo kpartx -d ${dst_device}
+sudo losetup -d ${dst_device}
 
 echo_succ "Done"
 

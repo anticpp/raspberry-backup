@@ -1,0 +1,18 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]
+then
+    echo "Usage: $0 file"
+    exit 1
+fi
+
+file=$1
+
+mkdir ./dst_boot ./dst_root
+
+ldevice=`sudo losetup -f --show ${file}`
+sudo kpartx -va ${ldevice}
+
+devname=`echo "${ldevice}" | awk -F '\/' '{print $NF}'`
+sudo mount -t vfat /dev/mapper/${devname}p1 ./dst_boot
+sudo mount -t ext4 /dev/mapper/${devname}p2 ./dst_root
