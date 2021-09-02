@@ -2,11 +2,12 @@
 
 # Global const
 DEFAULT_SRC_BOOT_MOUNT_POINT="./src_boot/"
-DEFAULT_SRC_ROOT_MOUNT_POING="./src_root/"
+DEFAULT_SRC_ROOT_MOUNT_POINT="./src_root/"
 DEFAULT_DST_BOOT_MOUNT_POINT="./dst_boot/"
 DEFAULT_DST_ROOT_MOUNT_POINT="./dst_root/"
 BOOT_FSTYPE="vfat"
 ROOT_FSTYPE="ext4"
+WORKDIR=`pwd`
 
 function help_message() {
     prog=$1
@@ -135,6 +136,8 @@ done
 [ ${if_help} == true ] && help_message $0 && exit 0
 [ "${src_device}" == "" ] && echo "-dev | --device is required" && exit 1
 
+echo "Current directory: ${WORKDIR}"
+
 echo ""
 echo "[Check bins]"
 check_bin "pv"        || exit 1
@@ -212,16 +215,26 @@ fi
 
 if [ ${if_src_boot_mounted} == False ]  
 then
-    # TODO
     echo "${src_boot_device} not mounted yet"
-    echo "Mounting ${src_boot_device} to ${DEFAULT_SRC_BOOT_MOUNT_POINT}"   
+    src_boot_mount_point=${DEFAULT_SRC_BOOT_MOUNT_POINT}
+    test -e ${src_boot_mount_point} && { echo_error_n "Warning: "; echo "\"${src_boot_mount_point}\" already exists, remove it before continue."; exit 1; }
+    sudo mkdir -pv ${src_boot_mount_point} || { echo_error_n "Error: "; echo "mkdir ${src_boot_mount_point}"; exit 1; }
+
+    echo -n "Mounting ${src_boot_device} to ${src_boot_mount_point} ... "   
+    sudo ${MOUNT} -t ${BOOT_FSTYPE} -o uid=pi,gid=pi ${src_boot_device} ${src_boot_mount_point} || { echo_error "error"; exit 1; }
+    echo_succ "ok"
 fi
 
 if [ ${if_src_root_mounted} == False ]  
 then
-    # TODO
     echo "${src_root_device} not mounted yet"
-    echo "Mounting ${src_root_device} to ${DEFAULT_SRC_ROOT_MOUNT_POING}"   
+    src_root_mount_point=${DEFAULT_SRC_ROOT_MOUNT_POINT}
+    test -e ${src_root_mount_point} && { echo_error_n "Warning: "; echo "\"${src_root_mount_point}\" already exists, remove it before continue."; exit 1; }
+    sudo mkdir -pv ${src_root_mount_point} || { echo_error_n "Error: "; echo "mkdir ${src_root_mount_point}"; exit 1; }
+
+    echo -n "Mounting ${src_root_device} to ${src_root_mount_point} ..."   
+    sudo ${MOUNT} -t ${ROOT_FSTYPE} ${src_root_device} ${src_root_mount_point} || { echo_error "error"; exit 1; }
+    echo_succ "ok"
 fi
 
 echo ""
@@ -295,7 +308,18 @@ echo "Cloning root filesystem...."
 sudo chown -R pi:pi ${dst_root_mount_point}
 rm -rfv "${dst_root_mount_point}/lost+found"
 cd ${dst_root_mount_point}
-sudo ${DUMP} -0auf - ${src_root_mount_point} | sudo ${RESTORE} -rf - 
+if [[ "${src_root_mount_point}" = /* ]]
+then
+    # Absolute path
+    echo "Absolute path"
+    sudo ${DUMP} -0auf - ${src_root_mount_point} | sudo ${RESTORE} -rf - 
+else
+    # Relative path
+    # We must add ${WORKDIR}, because have cd'ed.
+    echo "Relative path"
+    echo "${WORKDIR}/${src_root_mount_point}"
+    sudo ${DUMP} -0auf - ${WORKDIR}/${src_root_mount_point} | sudo ${RESTORE} -rf - 
+fi
 cd ../
 echo_succ "..............................ok"
 
@@ -326,9 +350,28 @@ do
     test -e $l && echo "remove $l ..." && rm -rfv $l
 done
 
-echo "Remove device ${dst_device}"
+echo -n "Removing device ${dst_device} ... "
 sudo kpartx -d ${dst_device}
 sudo losetup -d ${dst_device}
+echo_succ "ok"
+
+if [ ${if_src_boot_mounted} == False ]  
+then
+    dir=${src_boot_mount_point}
+    echo "Removing ${dir} ..."
+    test -e ${dir} && echo "umount ${dir}" && sudo umount ${dir}
+    test -e ${dir} && echo "remove ${dir}" && rm -rfv ${dir}
+    echo_succ "ok"
+fi
+
+if [ ${if_src_root_mounted} == False ]  
+then
+    dir=${src_root_mount_point}
+    echo "Removing ${dir} ..."
+    test -e ${dir} && echo "umount ${dir}" && sudo umount ${dir}
+    test -e ${dir} && echo "remove ${dir}" && rm -rfv ${dir}
+    echo_succ "ok"
+fi
 
 echo "${img_file}"
 echo_succ "Done"
