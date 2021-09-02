@@ -22,8 +22,8 @@ echo "gzip: ${gzip}"
 
 echo ""
 echo -e "\033[;31m[DANGEROUS]\033[0m"
-echo "It's dangerous flushing to ${device}, it'll not be recoverable."
-echo "Don't go on if you are not clear about what will happen."
+echo "You are going to rewrite ${device}, which causes unrecoverable damage."
+echo "Don't go on if you are not sure about what you are doing!!!"
 echo -n "Press \"YES\" to continue: "
 read yesOrNo
 [ "${yesOrNo}" != "YES" ] && echo "GoodBye!" && exit 0
